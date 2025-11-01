@@ -1,0 +1,13 @@
+# AWS Strands Agents SDK
+strands-agents==1.0.0
+strands-agents-tools==1.0.0
+
+# AWS SDK for Bedrock
+boto3>=1.34.19
+botocore>=1.34.19
+
+# Data validation and parsing
+pydantic>=2.5.3
+
+# Utilities
+python-dotenv>=1.0.0
