@@ -1,26 +1,32 @@
 """
 Multi-Agent Orchestrator for Customer Support Workflow
 
-Built using AWS Strands Agents SDK - Coordinates multiple specialized agents
+Built using AWS Strands Agents SDK with "Agents as Tools" pattern
+The orchestrator is itself an Agent that uses specialist agents as tools
 """
 
-from agents.intake_agent import IntakeAgent
-from agents.specialist_agents import get_specialist_agent
+from strands import Agent
+from strands.models import BedrockModel
+from agents.specialist_agents import SPECIALIST_AGENT_TOOLS
+from tools.customer_analysis import (
+    analyze_sentiment,
+    determine_urgency,
+    classify_intent,
+    check_escalation_needed
+)
 from typing import Dict, Any, Optional
-import json
-import re
 from datetime import datetime
 
 
 class CustomerSupportOrchestrator:
     """
-    Orchestrates the multi-agent customer support workflow
+    Orchestrates the multi-agent customer support workflow using "Agents as Tools" pattern
 
-    Workflow:
-    1. Intake Agent analyzes the inquiry
-    2. Routes to appropriate Specialist Agent
-    3. Specialist provides resolution
-    4. Returns complete support response
+    The orchestrator itself is an Agent that has access to:
+    1. Analysis tools (sentiment, urgency, intent, escalation)
+    2. Specialist agents exposed as tools (technical, billing, product)
+
+    The model decides which specialist agent to invoke based on the customer inquiry.
     """
 
     def __init__(
@@ -30,10 +36,10 @@ class CustomerSupportOrchestrator:
         enable_logging: bool = True
     ):
         """
-        Initialize the orchestrator
+        Initialize the orchestrator as an Agent with specialist agents as tools
 
         Args:
-            model_id: Bedrock model ID to use for all agents
+            model_id: Bedrock model ID to use
             region: AWS region for Bedrock
             enable_logging: Enable detailed logging
         """
@@ -41,86 +47,61 @@ class CustomerSupportOrchestrator:
         self.region = region
         self.enable_logging = enable_logging
 
-        # Initialize intake agent
-        self.intake_agent = IntakeAgent(model_id=model_id, region=region)
+        # Configure Bedrock model for orchestrator
+        self.model = BedrockModel(
+            model_id=model_id,
+            region=region,
+            temperature=0.7,
+            streaming=True
+        )
 
-        # Cache for specialist agents (lazy initialization)
-        self._specialist_cache = {}
+        # Combine analysis tools and specialist agents as tools
+        all_tools = [
+            analyze_sentiment,
+            determine_urgency,
+            classify_intent,
+            check_escalation_needed,
+        ] + SPECIALIST_AGENT_TOOLS
+
+        # Create the orchestrator agent with all tools
+        self.agent = Agent(
+            model=self.model,
+            tools=all_tools,
+            system="""You are a Customer Support Orchestrator Agent. Your role is to coordinate customer support by:
+
+1. **Analyzing the Customer Inquiry**: Use your analysis tools to understand:
+   - Sentiment (analyze_sentiment)
+   - Urgency level (determine_urgency)
+   - Intent/category (classify_intent)
+   - Whether escalation is needed (check_escalation_needed)
+
+2. **Routing to Specialist Agents**: Based on the inquiry type, delegate to the appropriate specialist agent:
+   - **technical_support_agent**: For technical issues, errors, bugs, API problems, performance issues
+   - **billing_support_agent**: For billing, payments, refunds, subscriptions, invoices
+   - **product_information_agent**: For product features, capabilities, integrations, how-to questions
+
+3. **Decision Making**:
+   - You decide which specialist agent to use based on the customer's inquiry
+   - You can use multiple tools/agents if needed
+   - If escalation is detected, inform the customer immediately
+   - Provide a professional, complete response
+
+**Important Guidelines**:
+- Always analyze the inquiry first to understand context
+- Choose the most appropriate specialist agent for the inquiry
+- If an inquiry spans multiple areas, you may consult multiple agents
+- Be empathetic and professional
+- Provide clear, actionable responses
+- Flag any critical escalations
+
+Your goal is to provide excellent customer support by intelligently routing inquiries to the right specialist agents."""
+        )
 
     def _log(self, message: str, level: str = "INFO"):
         """Internal logging method"""
         if self.enable_logging:
             timestamp = datetime.utcnow().isoformat()
             print(f"[{timestamp}] [{level}] {message}")
-
-    def _extract_classification(self, analysis_text: str) -> Dict[str, Any]:
-        """
-        Extract structured classification from agent analysis
-
-        Args:
-            analysis_text: Raw analysis text from intake agent
-
-        Returns:
-            Dictionary with extracted classifications
-        """
-        result = {
-            "intent": "GENERAL",
-            "urgency": "MEDIUM",
-            "sentiment": "NEUTRAL",
-            "requires_escalation": False,
-            "key_points": []
-        }
-
-        text_lower = analysis_text.lower()
-
-        # Extract intent
-        if "technical" in text_lower:
-            result["intent"] = "TECHNICAL"
-        elif "billing" in text_lower or "payment" in text_lower:
-            result["intent"] = "BILLING"
-        elif "product" in text_lower or "feature" in text_lower:
-            result["intent"] = "PRODUCT_INFO"
-
-        # Extract urgency
-        if "critical" in text_lower or "emergency" in text_lower:
-            result["urgency"] = "CRITICAL"
-        elif "high" in text_lower and "urgency" in text_lower:
-            result["urgency"] = "HIGH"
-        elif "low" in text_lower and "urgency" in text_lower:
-            result["urgency"] = "LOW"
-
-        # Extract sentiment
-        if "frustrated" in text_lower or "angry" in text_lower:
-            result["sentiment"] = "FRUSTRATED"
-        elif "negative" in text_lower or "dissatisfied" in text_lower:
-            result["sentiment"] = "NEGATIVE"
-        elif "positive" in text_lower or "happy" in text_lower:
-            result["sentiment"] = "POSITIVE"
-
-        # Check escalation
-        if "escalation" in text_lower or "escalate" in text_lower:
-            result["requires_escalation"] = True
-
-        return result
-
-    def _get_specialist(self, intent: str):
-        """
-        Get or create specialist agent for given intent
-
-        Args:
-            intent: The intent type
-
-        Returns:
-            Specialist agent instance
-        """
-        if intent not in self._specialist_cache:
-            self._log(f"Initializing specialist agent for intent: {intent}")
-            self._specialist_cache[intent] = get_specialist_agent(
-                intent,
-                model_id=self.model_id,
-                region=self.region
-            )
-        return self._specialist_cache[intent]
 
     def process_inquiry(
         self,
@@ -129,6 +110,11 @@ class CustomerSupportOrchestrator:
     ) -> Dict[str, Any]:
         """
         Process a customer inquiry through the multi-agent workflow
+
+        The orchestrator agent will:
+        1. Analyze the inquiry
+        2. Decide which specialist agent(s) to invoke
+        3. Return the complete response
 
         Args:
             customer_message: The customer's message
@@ -140,53 +126,34 @@ class CustomerSupportOrchestrator:
         workflow_id = f"WF-{datetime.utcnow().strftime('%Y%m%d%H%M%S')}"
         self._log(f"Starting workflow {workflow_id} for customer: {customer_id or 'unknown'}")
 
-        # Step 1: Intake Analysis
-        self._log("Step 1: Running intake analysis")
-        intake_result = self.intake_agent.analyze(customer_message, customer_id)
-        intake_analysis = intake_result["agent_response"]
+        # Construct the prompt for the orchestrator agent
+        prompt = f"""New customer support inquiry:
 
-        self._log(f"Intake analysis complete. Length: {len(str(intake_analysis))} chars")
+Customer ID: {customer_id or 'Not provided'}
+Customer Message: "{customer_message}"
 
-        # Step 2: Extract Classification
-        classification = self._extract_classification(str(intake_analysis))
-        self._log(f"Classification: Intent={classification['intent']}, "
-                 f"Urgency={classification['urgency']}, "
-                 f"Sentiment={classification['sentiment']}")
+Please:
+1. Analyze this inquiry to understand the customer's needs, sentiment, urgency, and intent
+2. Determine if immediate escalation is required
+3. Route to the appropriate specialist agent(s) to resolve the inquiry
+4. Provide a comprehensive, professional response
 
-        # Check for immediate escalation
-        if classification["requires_escalation"]:
-            self._log("ESCALATION REQUIRED - Flagging for human agent", level="WARNING")
-            return {
-                "workflow_id": workflow_id,
-                "customer_id": customer_id,
-                "status": "ESCALATED",
-                "intake_analysis": intake_analysis,
-                "classification": classification,
-                "escalation_message": "This inquiry has been flagged for immediate human review.",
-                "timestamp": datetime.utcnow().isoformat()
-            }
+Remember to use your analysis tools first, then delegate to the appropriate specialist agent."""
 
-        # Step 3: Route to Specialist
-        intent = classification["intent"]
-        self._log(f"Step 2: Routing to {intent} specialist")
+        self._log("Orchestrator agent processing inquiry...")
 
-        specialist = self._get_specialist(intent)
-        specialist_response = specialist.resolve(
-            customer_message,
-            context=classification
-        )
+        # Invoke the orchestrator agent - it will use tools as needed
+        response = self.agent(prompt)
 
-        self._log(f"Specialist response complete. Length: {len(str(specialist_response))} chars")
+        self._log(f"Orchestrator completed. Response length: {len(str(response))} chars")
 
-        # Step 4: Compile Final Response
+        # Return structured result
         return {
             "workflow_id": workflow_id,
             "customer_id": customer_id,
-            "status": "RESOLVED",
-            "intake_analysis": intake_analysis,
-            "classification": classification,
-            "specialist_type": intent,
-            "resolution": specialist_response,
+            "status": "COMPLETED",
+            "original_message": customer_message,
+            "response": response,
             "timestamp": datetime.utcnow().isoformat()
         }
 
@@ -203,7 +170,7 @@ class CustomerSupportOrchestrator:
             customer_id: Optional customer identifier
 
         Yields:
-            Streaming workflow updates
+            Streaming response chunks
         """
         workflow_id = f"WF-{datetime.utcnow().strftime('%Y%m%d%H%M%S')}"
 
@@ -213,49 +180,24 @@ class CustomerSupportOrchestrator:
             "customer_id": customer_id
         }
 
-        # Intake analysis with streaming
-        yield {"type": "stage", "stage": "intake_analysis", "status": "started"}
+        # Construct prompt
+        prompt = f"""New customer support inquiry:
 
-        intake_result = self.intake_agent.analyze(customer_message, customer_id)
-        classification = self._extract_classification(str(intake_result["agent_response"]))
+Customer ID: {customer_id or 'Not provided'}
+Customer Message: "{customer_message}"
 
-        yield {
-            "type": "stage",
-            "stage": "intake_analysis",
-            "status": "completed",
-            "classification": classification
-        }
+Please analyze and resolve this inquiry using the appropriate tools and specialist agents."""
 
-        # Check escalation
-        if classification["requires_escalation"]:
+        # Stream the response
+        for chunk in self.agent.stream(prompt):
             yield {
-                "type": "escalation",
-                "message": "Inquiry requires human agent review"
+                "type": "content",
+                "content": chunk
             }
-            return
-
-        # Specialist resolution
-        yield {
-            "type": "stage",
-            "stage": "specialist_resolution",
-            "status": "started",
-            "specialist_type": classification["intent"]
-        }
-
-        specialist = self._get_specialist(classification["intent"])
-        resolution = specialist.resolve(customer_message, context=classification)
-
-        yield {
-            "type": "stage",
-            "stage": "specialist_resolution",
-            "status": "completed",
-            "resolution": resolution
-        }
 
         yield {
             "type": "workflow_complete",
-            "workflow_id": workflow_id,
-            "status": "RESOLVED"
+            "workflow_id": workflow_id
         }
 
 
@@ -269,6 +211,9 @@ def handle_customer_inquiry(
     """
     Convenience function to handle a customer inquiry with one call
 
+    Uses the "Agents as Tools" pattern where the orchestrator agent
+    intelligently routes to specialist agents based on the inquiry.
+
     Args:
         message: Customer's message
         customer_id: Optional customer ID
@@ -277,6 +222,13 @@ def handle_customer_inquiry(
 
     Returns:
         Complete workflow result
+
+    Example:
+        >>> result = handle_customer_inquiry(
+        ...     message="I'm getting a 500 error on the API",
+        ...     customer_id="CUST-12345"
+        ... )
+        >>> print(result['response'])
     """
     orchestrator = CustomerSupportOrchestrator(
         model_id=model_id,

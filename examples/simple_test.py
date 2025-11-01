@@ -72,7 +72,6 @@ print("\n5. Checking project structure...")
 required_files = [
     'tools/knowledge_base.py',
     'tools/customer_analysis.py',
-    'agents/intake_agent.py',
     'agents/specialist_agents.py',
     'orchestrator.py',
 ]
@@ -102,14 +101,8 @@ except ImportError as e:
     print(f"   ❌ knowledge_base tools: {e}")
 
 try:
-    from agents.intake_agent import IntakeAgent
-    print("   ✓ intake_agent")
-except ImportError as e:
-    print(f"   ❌ intake_agent: {e}")
-
-try:
-    from agents.specialist_agents import TechnicalSupportAgent
-    print("   ✓ specialist_agents")
+    from agents.specialist_agents import SPECIALIST_AGENT_TOOLS
+    print("   ✓ specialist_agents (as tools)")
 except ImportError as e:
     print(f"   ❌ specialist_agents: {e}")
 

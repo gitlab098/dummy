@@ -1,34 +1,37 @@
 """
 Specialist Agents - Handle specific types of customer inquiries
 
-Built using AWS Strands Agents SDK
+Built using AWS Strands Agents SDK with "Agents as Tools" pattern
 """
 
-from strands import Agent
+from strands import Agent, tool
 from strands.models import BedrockModel
 from tools.knowledge_base import (
     search_technical_kb,
     search_billing_kb,
     search_product_kb
 )
-from typing import Dict, Any
 
 
-class TechnicalSupportAgent:
-    """
-    Technical Support Agent - Handles technical issues and troubleshooting
-    """
+# Initialize specialist agents globally so they can be reused
+_technical_agent = None
+_billing_agent = None
+_product_agent = None
 
-    def __init__(self, model_id: str = "anthropic.claude-3-5-sonnet-20241022-v2:0", region: str = "us-west-2"):
-        self.model = BedrockModel(
+
+def get_technical_agent(model_id: str = "anthropic.claude-3-5-sonnet-20241022-v2:0", region: str = "us-west-2"):
+    """Get or create the technical support agent"""
+    global _technical_agent
+    if _technical_agent is None:
+        model = BedrockModel(
             model_id=model_id,
             region=region,
             temperature=0.7,
-            streaming=True
+            streaming=False  # Set to False for tool usage
         )
 
-        self.agent = Agent(
-            model=self.model,
+        _technical_agent = Agent(
+            model=model,
             tools=[search_technical_kb],
             system="""You are a Technical Support Specialist. Your role is to:
 
@@ -47,58 +50,22 @@ Guidelines:
 
 Your goal is to resolve technical issues efficiently while maintaining excellent customer experience."""
         )
-
-    def resolve(self, customer_message: str, context: Dict[str, Any] = None) -> str:
-        """
-        Provide technical support resolution
-
-        Args:
-            customer_message: The customer's technical issue
-            context: Additional context from intake analysis
-
-        Returns:
-            Technical support response
-        """
-        context_str = ""
-        if context:
-            context_str = f"""
-Context from intake analysis:
-- Urgency: {context.get('urgency', 'N/A')}
-- Sentiment: {context.get('sentiment', 'N/A')}
-"""
-
-        prompt = f"""{context_str}
-
-Customer's Technical Issue:
-"{customer_message}"
-
-Please:
-1. Search the technical knowledge base for relevant solutions
-2. Analyze the issue and provide diagnostic steps
-3. Offer a clear, step-by-step resolution
-4. Include relevant KB article references
-5. Indicate if engineering escalation is needed
-
-Provide a comprehensive technical support response."""
-
-        return self.agent(prompt)
+    return _technical_agent
 
 
-class BillingSupportAgent:
-    """
-    Billing Support Agent - Handles billing, payments, and subscriptions
-    """
-
-    def __init__(self, model_id: str = "anthropic.claude-3-5-sonnet-20241022-v2:0", region: str = "us-west-2"):
-        self.model = BedrockModel(
+def get_billing_agent(model_id: str = "anthropic.claude-3-5-sonnet-20241022-v2:0", region: str = "us-west-2"):
+    """Get or create the billing support agent"""
+    global _billing_agent
+    if _billing_agent is None:
+        model = BedrockModel(
             model_id=model_id,
             region=region,
-            temperature=0.5,  # Lower temperature for accuracy with financial matters
-            streaming=True
+            temperature=0.5,
+            streaming=False
         )
 
-        self.agent = Agent(
-            model=self.model,
+        _billing_agent = Agent(
+            model=model,
             tools=[search_billing_kb],
             system="""You are a Billing Support Specialist. Your role is to:
 
@@ -119,59 +86,22 @@ Guidelines:
 
 Your goal is to resolve billing matters with accuracy and professionalism."""
         )
-
-    def resolve(self, customer_message: str, context: Dict[str, Any] = None) -> str:
-        """
-        Provide billing support resolution
-
-        Args:
-            customer_message: The customer's billing inquiry
-            context: Additional context from intake analysis
-
-        Returns:
-            Billing support response
-        """
-        context_str = ""
-        if context:
-            context_str = f"""
-Context from intake analysis:
-- Urgency: {context.get('urgency', 'N/A')}
-- Sentiment: {context.get('sentiment', 'N/A')}
-"""
-
-        prompt = f"""{context_str}
-
-Customer's Billing Inquiry:
-"{customer_message}"
-
-Please:
-1. Search the billing knowledge base for relevant policies
-2. Address the customer's billing concern clearly
-3. Explain any charges or processes
-4. Provide steps for resolution (refunds, payment updates, etc.)
-5. Include relevant policy references from KB
-6. Indicate if finance team escalation is needed
-
-Provide a clear and accurate billing support response."""
-
-        return self.agent(prompt)
+    return _billing_agent
 
 
-class ProductInformationAgent:
-    """
-    Product Information Agent - Provides information about features and capabilities
-    """
-
-    def __init__(self, model_id: str = "anthropic.claude-3-5-sonnet-20241022-v2:0", region: str = "us-west-2"):
-        self.model = BedrockModel(
+def get_product_agent(model_id: str = "anthropic.claude-3-5-sonnet-20241022-v2:0", region: str = "us-west-2"):
+    """Get or create the product information agent"""
+    global _product_agent
+    if _product_agent is None:
+        model = BedrockModel(
             model_id=model_id,
             region=region,
             temperature=0.7,
-            streaming=True
+            streaming=False
         )
 
-        self.agent = Agent(
-            model=self.model,
+        _product_agent = Agent(
+            model=model,
             tools=[search_product_kb],
             system="""You are a Product Information Specialist. Your role is to:
 
@@ -192,62 +122,61 @@ Guidelines:
 
 Your goal is to help customers understand and maximize value from the product."""
         )
-
-    def resolve(self, customer_message: str, context: Dict[str, Any] = None) -> str:
-        """
-        Provide product information response
-
-        Args:
-            customer_message: The customer's product question
-            context: Additional context from intake analysis
-
-        Returns:
-            Product information response
-        """
-        context_str = ""
-        if context:
-            context_str = f"""
-Context from intake analysis:
-- Urgency: {context.get('urgency', 'N/A')}
-- Sentiment: {context.get('sentiment', 'N/A')}
-"""
-
-        prompt = f"""{context_str}
-
-Customer's Product Question:
-"{customer_message}"
-
-Please:
-1. Search the product knowledge base for relevant information
-2. Answer the customer's question comprehensively
-3. Provide practical examples or use cases
-4. Share relevant documentation links from KB
-5. Suggest related features that might interest them
-6. Include getting started steps if applicable
-
-Provide a helpful and informative product response."""
-
-        return self.agent(prompt)
+    return _product_agent
 
 
-# Agent routing function
-def get_specialist_agent(intent: str, **kwargs):
+# Expose specialist agents as tools using @tool decorator
+@tool
+def technical_support_agent(customer_inquiry: str) -> str:
     """
-    Get the appropriate specialist agent based on intent
+    Technical Support Agent - Handles technical issues, errors, bugs, and troubleshooting.
+    Use this for connection problems, performance issues, error messages, crashes, API issues, etc.
 
     Args:
-        intent: The classified intent type
-        **kwargs: Additional arguments for agent initialization
+        customer_inquiry: The customer's technical problem or question
 
     Returns:
-        Appropriate specialist agent instance
+        Detailed technical support response with troubleshooting steps
     """
-    agent_map = {
-        "TECHNICAL": TechnicalSupportAgent,
-        "BILLING": BillingSupportAgent,
-        "PRODUCT_INFO": ProductInformationAgent,
-        "GENERAL": ProductInformationAgent  # Default to product info
-    }
+    agent = get_technical_agent()
+    return agent(customer_inquiry)
 
-    agent_class = agent_map.get(intent, ProductInformationAgent)
-    return agent_class(**kwargs)
+
+@tool
+def billing_support_agent(customer_inquiry: str) -> str:
+    """
+    Billing Support Agent - Handles billing, payments, refunds, and subscription matters.
+    Use this for charges, invoices, payment methods, refund requests, subscription changes, etc.
+
+    Args:
+        customer_inquiry: The customer's billing-related inquiry
+
+    Returns:
+        Detailed billing support response with policy information and resolution steps
+    """
+    agent = get_billing_agent()
+    return agent(customer_inquiry)
+
+
+@tool
+def product_information_agent(customer_inquiry: str) -> str:
+    """
+    Product Information Agent - Provides information about product features, capabilities, and usage.
+    Use this for feature questions, integration inquiries, how-to questions, best practices, etc.
+
+    Args:
+        customer_inquiry: The customer's product-related question
+
+    Returns:
+        Comprehensive product information with examples and documentation references
+    """
+    agent = get_product_agent()
+    return agent(customer_inquiry)
+
+
+# List of all specialist agent tools for easy import
+SPECIALIST_AGENT_TOOLS = [
+    technical_support_agent,
+    billing_support_agent,
+    product_information_agent
+]

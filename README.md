@@ -1,8 +1,10 @@
 # Customer Support Agentic AI Workflow
 
-**Built with AWS Strands Agents SDK**
+**Built with AWS Strands Agents SDK using "Agents as Tools" Pattern**
 
 An intelligent, multi-agent customer support system that automatically analyzes, routes, and resolves customer inquiries using AI agents powered by Amazon Bedrock and AWS Strands Agents framework.
+
+✨ **Features the "Agents as Tools" pattern** - specialist agents are exposed as tools to an orchestrator agent, enabling model-driven routing decisions.
 
 ## 🎯 Overview
 
@@ -16,49 +18,65 @@ The workflow handles:
 - **Product Information**: Feature questions, integrations, best practices
 - **Escalation Management**: Automatic detection of cases requiring human intervention
 
-## 🏗️ Architecture
+## 🏗️ Architecture - "Agents as Tools" Pattern
 
 ```
-Customer Inquiry
-      ↓
-┌─────────────────┐
-│  Intake Agent   │  ← Analyzes & classifies inquiry
-│                 │  ← Uses: sentiment, urgency, intent tools
-└────────┬────────┘
-         ↓
-    [Classification]
-         ↓
-    ┌────┴────┐
-    │ Router  │
-    └────┬────┘
-         ↓
-    ┌────┴────────────────┬─────────────────┐
-    ↓                     ↓                  ↓
-┌──────────┐      ┌──────────┐      ┌──────────┐
-│Technical │      │ Billing  │      │ Product  │
-│ Support  │      │ Support  │      │   Info   │
-│  Agent   │      │  Agent   │      │  Agent   │
-└────┬─────┘      └────┬─────┘      └────┬─────┘
-     ↓                 ↓                  ↓
-[KB Search]       [KB Search]        [KB Search]
-     ↓                 ↓                  ↓
-[Resolution]      [Resolution]        [Resolution]
-     └─────────────────┴──────────────────┘
-                       ↓
-              [Final Response]
+                    Customer Inquiry
+                           ↓
+        ┌─────────────────────────────────┐
+        │  Orchestrator Agent             │
+        │  (Model-driven routing)         │
+        └──────────┬──────────────────────┘
+                   │
+                   │ Has access to tools:
+                   │
+        ┌──────────┴──────────┐
+        │                     │
+        ▼                     ▼
+   [Analysis Tools]    [Specialist Agents as Tools]
+        │                     │
+        ├─ analyze_sentiment  ├─ technical_support_agent() ← Agent as Tool!
+        ├─ determine_urgency  ├─ billing_support_agent()   ← Agent as Tool!
+        ├─ classify_intent    └─ product_information_agent() ← Agent as Tool!
+        └─ check_escalation
+                   │
+                   ▼
+        Model decides which tools to invoke
+                   │
+                   ▼
+        ┌──────────┴──────────┐
+        │                     │
+        ▼                     ▼
+  [Analysis]         [Specialist Agent]
+                            │
+                            ├─ Has own tools (KB search)
+                            ├─ Domain expertise
+                            └─ Returns resolution
+                   │
+                   ▼
+            [Final Response]
 ```
+
+**Key Innovation**: The orchestrator is itself an Agent that has specialist agents available as tools. The model intelligently decides which specialist to invoke - no manual routing logic!
 
 ## ✨ Key Features
 
-### Multi-Agent Orchestration
-- **Intake Agent**: Analyzes customer sentiment, urgency, and intent
-- **Specialist Agents**: Domain-specific expertise (Technical, Billing, Product)
-- **Intelligent Routing**: Automatically routes to the right specialist
-- **Escalation Detection**: Identifies cases requiring human intervention
+### "Agents as Tools" Pattern ⭐
+- **Specialist Agents as Tools**: Each specialist agent (Technical, Billing, Product) is exposed as a tool using the `@tool` decorator
+- **Model-Driven Routing**: The orchestrator agent decides which specialist to invoke based on the inquiry - no manual routing code!
+- **Intelligent Decision Making**: The LLM analyzes the query and chooses the appropriate specialist agent(s)
+- **Composable Architecture**: Easy to add new specialist agents - just add them as tools
 
-### Built with AWS Strands Agents
-- **Model-Driven Approach**: Simple, maintainable agent definitions
+### Multi-Agent Orchestration
+- **Orchestrator Agent**: Main agent with access to all analysis tools and specialist agents
+- **Analysis Tools**: Sentiment, urgency, intent classification, escalation detection
+- **Specialist Agents**: Domain-specific expertise (Technical, Billing, Product) - each is itself an Agent with its own tools
+- **Collaborative Resolution**: Can invoke multiple specialists for complex inquiries
+
+### Built with AWS Strands Agents SDK
+- **Model-Driven Approach**: Simple, declarative agent definitions
 - **Tool Integration**: Custom tools using `@tool` decorator
+- **Agent Composition**: Agents can use other agents as tools
 - **Amazon Bedrock**: Powered by Claude 3.5 Sonnet
 - **Streaming Support**: Real-time response generation
 - **Production-Ready**: Battle-tested framework used by AWS teams
@@ -159,19 +177,19 @@ for update in orchestrator.process_inquiry_streaming(message, customer_id):
     print(f"Update: {update['type']} - {update.get('status', '')}")
 ```
 
-### Using Individual Agents
+### Using Specialist Agents Directly
 
 ```python
-from agents.intake_agent import IntakeAgent
-from agents.specialist_agents import TechnicalSupportAgent
+from agents.specialist_agents import (
+    technical_support_agent,
+    billing_support_agent,
+    product_information_agent
+)
 
-# Intake agent
-intake = IntakeAgent()
-analysis = intake.analyze("My app keeps crashing")
-
-# Technical support agent
-tech_agent = TechnicalSupportAgent()
-resolution = tech_agent.resolve("My app keeps crashing")
+# Call specialist agent tools directly
+response = technical_support_agent("My app keeps crashing")
+# Note: Usually the orchestrator agent decides which to call,
+# but you can invoke them directly for testing
 ```
 
 ### Creating Custom Tools
@@ -209,23 +227,74 @@ response = agent("What's the status of account CUST-123?")
 ```
 dummy/
 ├── README.md                      # This file
-├── requirements.txt               # Python dependencies
-├── .gitignore                     # Git ignore rules
+├── requirements.txt               # Python dependencies (Strands Agents SDK)
+├── .gitignore
 │
-├── tools/                         # Reusable tools for agents
-│   ├── customer_analysis.py       # Sentiment, urgency, intent tools
+├── tools/                         # @tool decorated functions
+│   ├── customer_analysis.py       # Analysis tools (sentiment, urgency, intent)
 │   └── knowledge_base.py          # KB search tools
 │
-├── agents/                        # AI agent definitions
-│   ├── intake_agent.py            # Initial analysis agent
-│   └── specialist_agents.py       # Domain specialist agents
+├── agents/
+│   └── specialist_agents.py       # Specialist agents exposed as @tools
+│                                  # - technical_support_agent()
+│                                  # - billing_support_agent()
+│                                  # - product_information_agent()
 │
-├── orchestrator.py                # Multi-agent orchestration
+├── orchestrator.py                # Orchestrator Agent (uses agents as tools)
 │
-└── examples/                      # Usage examples
+└── examples/
     ├── simple_test.py             # Setup verification
-    └── basic_usage.py             # Comprehensive examples
+    └── basic_usage.py             # "Agents as Tools" examples
 ```
+
+## 🎓 Understanding "Agents as Tools"
+
+### What is This Pattern?
+
+The "Agents as Tools" pattern is a key multi-agent orchestration primitive in AWS Strands Agents SDK that allows you to:
+
+1. **Create Specialist Agents** - Build focused agents with domain expertise
+2. **Expose as Tools** - Wrap agents using `@tool` decorator
+3. **Model-Driven Routing** - Let the LLM decide which agent to invoke
+
+### Code Example
+
+```python
+# Step 1: Create a specialist agent
+technical_agent = Agent(
+    model=BedrockModel(...),
+    tools=[search_technical_kb],
+    system="You are a technical support specialist..."
+)
+
+# Step 2: Expose the agent as a tool
+@tool
+def technical_support_agent(customer_inquiry: str) -> str:
+    """Handles technical issues and troubleshooting."""
+    return technical_agent(customer_inquiry)
+
+# Step 3: Orchestrator agent uses it as a tool
+orchestrator = Agent(
+    tools=[
+        analyze_sentiment,
+        technical_support_agent,  # ← Agent as a tool!
+        billing_support_agent,    # ← Agent as a tool!
+    ],
+    system="Route inquiries to the appropriate specialist agent..."
+)
+
+# The model decides which tool/agent to invoke
+response = orchestrator("I'm getting API errors")
+# ↑ Model will likely invoke technical_support_agent()
+```
+
+### Benefits
+
+✅ **No Manual Routing** - Model intelligence drives decisions
+✅ **Declarative Code** - Simple, maintainable architecture
+✅ **Easy to Extend** - Add new specialists by adding tools
+✅ **Agent Collaboration** - Multiple agents can work together
+✅ **Production-Ready** - Pattern used by AWS teams
 
 ## 🎓 Examples
 
@@ -236,12 +305,13 @@ python examples/basic_usage.py
 ```
 
 This demonstrates:
-1. ✅ Technical support inquiry
-2. ✅ Billing inquiry with refund request
-3. ✅ Product information question
-4. ✅ Escalation scenario
-5. ✅ Streaming workflow
-6. ✅ Batch processing multiple inquiries
+1. ✅ Technical support inquiry → model invokes `technical_support_agent()`
+2. ✅ Billing inquiry → model invokes `billing_support_agent()`
+3. ✅ Product question → model invokes `product_information_agent()`
+4. ✅ Multi-agent scenario → model may invoke multiple specialist agents
+5. ✅ Streaming workflow → real-time agent tool calls
+6. ✅ Intelligent routing → model-driven routing decisions
+7. ✅ Pattern explanation → detailed "Agents as Tools" walkthrough
 
 ## 🔧 Configuration
 
@@ -281,39 +351,52 @@ def search_technical_kb(query: str) -> List[Dict[str, str]]:
     return results
 ```
 
-## 🎯 Workflow Details
+## 🎯 Workflow Details - "Agents as Tools" Execution
 
-### 1. Intake Agent Analysis
+### 1. Customer Inquiry Received
 
-The intake agent uses specialized tools to analyze:
-- **Sentiment**: POSITIVE, NEUTRAL, NEGATIVE, FRUSTRATED
-- **Urgency**: CRITICAL, HIGH, MEDIUM, LOW
-- **Intent**: TECHNICAL, BILLING, PRODUCT_INFO, GENERAL
-- **Escalation**: Automatic detection of escalation needs
+The orchestrator agent receives the customer message and begins processing.
 
-### 2. Intelligent Routing
+### 2. Analysis Phase (Model-Driven)
 
-Based on the intake analysis:
-- **TECHNICAL** → Routes to Technical Support Agent
-- **BILLING** → Routes to Billing Support Agent
-- **PRODUCT_INFO** → Routes to Product Information Agent
-- **GENERAL** → Routes to Product Information Agent (default)
+The orchestrator agent has access to analysis tools and **decides** which to use:
+- `analyze_sentiment()` - Detects: POSITIVE, NEUTRAL, NEGATIVE, FRUSTRATED
+- `determine_urgency()` - Classifies: CRITICAL, HIGH, MEDIUM, LOW
+- `classify_intent()` - Identifies: TECHNICAL, BILLING, PRODUCT_INFO, GENERAL
+- `check_escalation_needed()` - Flags critical cases
 
-### 3. Specialist Resolution
+**Key Point**: The model determines which analysis tools to invoke and in what order.
 
-Each specialist agent:
-- Searches relevant knowledge base
-- Provides domain-specific expertise
+### 3. Intelligent Routing (Model-Driven)
+
+Based on its analysis, the orchestrator agent **chooses** which specialist agent to invoke:
+- `technical_support_agent()` - For technical issues, errors, bugs
+- `billing_support_agent()` - For payments, refunds, subscriptions
+- `product_information_agent()` - For features, capabilities, integrations
+
+**Key Point**: No manual routing code! The model reads tool descriptions and decides which specialist agent to call. It can even invoke multiple specialists for complex inquiries.
+
+### 4. Specialist Resolution
+
+Each specialist agent (which is itself an Agent with tools):
+- Searches relevant knowledge base using its own tools
+- Applies domain-specific expertise
 - Returns actionable resolution steps
 - Includes KB article references
 
-### 4. Escalation Handling
+### 5. Final Response
+
+The orchestrator synthesizes the specialist's response and returns it to the customer.
+
+### 6. Escalation Handling
 
 Automatic escalation triggered by:
 - Critical urgency keywords (emergency, critical, urgent)
 - Legal keywords (lawsuit, attorney, legal)
 - Security keywords (breach, fraud, security incident)
 - Frustrated sentiment + high urgency combination
+
+**Architecture Advantage**: Adding new specialists is as simple as creating a new agent and exposing it as a tool!
 
 ## 🚀 Production Deployment
 
